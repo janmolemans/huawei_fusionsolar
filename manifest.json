@@ -1,0 +1,15 @@
+{
+  "domain": "huawei_fusionsolar",
+  "name": "Huawei Fusionsolar",
+  "config_flow": true,
+  "documentation": "https://www.home-assistant.io/integrations/huawei_fusionsolar",
+  "requirements": [],
+  "ssdp": [],
+  "zeroconf": [],
+  "homekit": {},
+  "dependencies": [],
+  "codeowners": [
+    "@janmolemans"
+  ],
+  "iot_class": "cloud_polling"
+}
