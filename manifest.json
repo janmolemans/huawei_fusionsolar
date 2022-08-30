@@ -3,11 +3,11 @@
   "name": "Huawei Fusionsolar",
   "config_flow": true,
   "documentation": "https://www.home-assistant.io/integrations/huawei_fusionsolar",
-  "requirements": [],
+  "requirements": ["pandas==1.4.3"],
   "ssdp": [],
   "zeroconf": [],
   "homekit": {},
-  "dependencies": [],
+  "dependencies": [], 
   "codeowners": [
     "@janmolemans"
   ],

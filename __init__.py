@@ -20,6 +20,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Huawei Fusionsolar from a config entry."""
     # Store an instance of the "connecting" class (=API object) that does the work of speaking
     # with your actual devices.
+    #TODO below only works for a single plant
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = FusionSolarClient(entry.data[CONF_USERNAME],
                                                                         entry.data[CONF_PASSWORD], 
                                                                         entry.data[CONF_REGION])
