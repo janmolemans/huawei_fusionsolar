@@ -8,7 +8,7 @@ from .const import CONF_USERNAME, CONF_PASSWORD, CONF_REGION
 
 
 from .const import DOMAIN
-from .FusionSolarPy.src.fusion_solar_py.client import FusionSolarClient
+from FusionSolarPy.src.fusion_solar_py.client import FusionSolarClient
 
 
 # TODO List the platforms that you want to support.
