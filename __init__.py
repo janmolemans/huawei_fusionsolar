@@ -8,7 +8,8 @@ from .const import CONF_USERNAME, CONF_PASSWORD, CONF_REGION
 
 
 from .const import DOMAIN
-from FusionSolarPy.src.fusion_solar_py.client import FusionSolarClient
+# from FusionSolarPy.src.fusion_solar_py.client import FusionSolarClient
+from fusion_solar_py.client import FusionSolarClient
 
 
 # TODO List the platforms that you want to support.
@@ -20,7 +21,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Huawei Fusionsolar from a config entry."""
     # Store an instance of the "connecting" class (=API object) that does the work of speaking
     # with your actual devices.
-    #TODO below only works for a single plant
+    #TODO below only works for a single plant for now
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = FusionSolarClient(entry.data[CONF_USERNAME],
                                                                         entry.data[CONF_PASSWORD], 
                                                                         entry.data[CONF_REGION])

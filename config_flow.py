@@ -15,7 +15,8 @@ from homeassistant.helpers.selector import selector
 # from homeassistant.components.sensor import PLATFORM_SCHEMA
 
 from .const import DOMAIN, CONF_REGION, CONF_USERNAME, CONF_PASSWORD
-from FusionSolarPy.src.fusion_solar_py.client import FusionSolarClient
+# from FusionSolarPy.src.fusion_solar_py.client import FusionSolarClient
+from fusion_solar_py.client import FusionSolarClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 
 def validate_credentials(username, password, region):
     client =  FusionSolarClient(username, password, region)
-    client._login()
+    client.login()
     #check for linked plants
     return client.get_plants() #[0].name
 

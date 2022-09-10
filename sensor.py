@@ -4,6 +4,7 @@ import datetime
 from zoneinfo import ZoneInfo
 
 import logging
+import pandas
 
 import async_timeout
 
@@ -27,6 +28,13 @@ from homeassistant.const import (
     TEMP_CELSIUS,
     TIME_MINUTES,
 )
+import homeassistant.util.dt as dt_util
+from homeassistant.components.recorder import get_instance
+from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
+from homeassistant.components.recorder.statistics import (
+    async_add_external_statistics,
+    get_last_statistics,
+)
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import (
@@ -35,7 +43,7 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
-from .const import DOMAIN, ATTR_DATA_REALKPI
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,30 +61,76 @@ async def async_setup_entry(
     The only difference is we retrieve the config data from the config entry instance."""
     # assuming API object stored here by __init__.py
     fusion_api = hass.data[DOMAIN][config_entry.entry_id]
-    devices = await hass.async_add_executor_job(fusion_api.get_devices)
-
     entities = []
-    for device in devices:
-        coordinator = DeviceCoordinator(hass, device)
+
+    # add plant statistics (this overlaps with device statistics)
+    plants = await hass.async_add_executor_job(fusion_api.get_plants)
+    for plant in plants:
+        coordinator = PlantCoordinator(hass, plant)
         await coordinator.async_config_entry_first_refresh()  # TODO check where this needs to come
         for metric in coordinator.data.values():
             description = metric_to_description(metric)
             if description is not None:
                 entities.append(FusionSolarEntity(coordinator, description))
     async_add_entities(entities)
-    # Fetch initial data so we have data when entities subscribe
-    #
-    # If the refresh fails, async_config_entry_first_refresh will
-    # raise ConfigEntryNotReady and setup will try again later
-    #
-    # If you do not want to retry setup on failure, use
-    # coordinator.async_refresh() instead
-    #
-    # await coordinator.async_config_entry_first_refresh()
 
-    # async_add_entities(
-    #     FusionSolarPowerEntity(coordinator, name=key) for key in coordinator.data
-    # )
+    # add device statistics
+    add_device_metrics=False #TODO enable later
+    if add_device_metrics:
+        devices = await hass.async_add_executor_job(fusion_api.get_devices)
+        for device in devices:
+            coordinator = DeviceCoordinator(hass, device)
+            await coordinator.async_config_entry_first_refresh()  # TODO check where this needs to come
+            for metric in coordinator.data.values():
+                description = metric_to_description(metric)
+                if description is not None:
+                    entities.append(FusionSolarEntity(coordinator, description))
+        async_add_entities(entities)
+
+    # insert historical data
+    _LOGGER.info("adding historical statistics")
+
+    dt = datetime.datetime(year=2022,month=9,day=9)
+    query_time= int(dt.timestamp())*1000
+
+    df = await hass.async_add_executor_job(lambda x: plants[0].get_plant_stats(*x, query_time=query_time),[]) # very ugly hack as i am not allowed ot provide keyword arguments
+    df_hour=df.groupby(pandas.Grouper(freq='60Min')).mean()
+
+    await _insert_statistics(hass, df_hour)
+    _LOGGER.info(f"finished inserting stats")
+
+    return True
+
+
+async def _insert_statistics(hass, df_hour):
+    #TODO move perhaps to inside coordinator class
+    """Insert historical statistics."""
+    # DOMAIN='sensor' #TODO remove this is for testing
+    for column in df_hour.columns:
+        statistic_id = f"{DOMAIN}:{column}".lower()
+
+        _LOGGER.info(f"adding historical statistics for column {statistic_id}")
+
+        statistics=[]
+        for dt, val in zip(df_hour.index,df_hour[column]):
+            statistics.append(
+                StatisticData(
+                    start=dt,
+                    mean=val,
+                    min=val,
+                    max=val,
+                )  )      
+
+        metadata = StatisticMetaData(
+            has_mean=True,
+            has_sum=False,
+            # name=column,
+            source=DOMAIN,
+            statistic_id=statistic_id,
+            unit_of_measurement=POWER_KILO_WATT,
+        )
+        _LOGGER.info(f"adding {len(statistics)} statistics for column {statistic_id}")
+        async_add_external_statistics(hass, metadata, statistics)
 
 
 def metric_to_description(metric):
@@ -169,9 +223,32 @@ def metric_to_description(metric):
         entity_category=entity_category,
     )
 
+class PlantCoordinator(DataUpdateCoordinator):
+    """My custom plant coordinator."""
+
+    def __init__(self, hass, plant):
+        """Initialize my coordinator."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            # Name of the data. For logging purposes.
+            name=plant.name,
+            # Polling interval. Will only be polled if there are subscribers.
+            update_interval=datetime.timedelta(seconds=300),  # TODO change
+        )
+        self.plant = plant
+
+    async def _async_update_data(self):
+        """Fetch data from API endpoint.
+
+        This is the place to pre-process the data to lookup tables
+        so entities can quickly look up their data.
+        """
+        return await self.hass.async_add_executor_job(self.plant.get_last_plant_stats)
+
 
 class DeviceCoordinator(DataUpdateCoordinator):
-    """My custom coordinator."""
+    """My custom device coordinator."""
 
     def __init__(self, hass, device):
         """Initialize my coordinator."""
@@ -194,10 +271,6 @@ class DeviceCoordinator(DataUpdateCoordinator):
         # try:
         # Note: asyncio.TimeoutError and aiohttp.ClientError are already
         # handled by the data update coordinator.
-        # await self.hass.async_add_executor_job(self.my_api.get_plants)
-        # return await self.hass.async_add_executor_job(
-        #     self.my_api.plants[0].get_last_plant_stats
-        #             )
         return await self.hass.async_add_executor_job(self.device.get_device_stats)
         # async with async_timeout.timeout(10):
         #     return await self.my_api.get_power_status()
@@ -208,6 +281,8 @@ class DeviceCoordinator(DataUpdateCoordinator):
         #     raise ConfigEntryAuthFailed from err
         # except ApiError as err:
         #     raise UpdateFailed(f"Error communicating with API: {err}")
+
+    
 
 
 class FusionSolarEntity(CoordinatorEntity, SensorEntity):
@@ -226,8 +301,6 @@ class FusionSolarEntity(CoordinatorEntity, SensorEntity):
         self.coordinator = coordinator
         self.entity_description = description
 
-        # self._attr_device_info = device_info
-        # self._attr_unique_id = f"{coordinator.bridge.serial_number}_{description.key}"
 
     @property
     def native_value(self):
@@ -249,52 +322,4 @@ class FusionSolarEntity(CoordinatorEntity, SensorEntity):
             return value
 
 
-# class FusionSolarEntity(CoordinatorEntity, SensorEntity):
-#     """Base class for all FusionSolarPower entities.
 
-#     The CoordinatorEntity class provides:
-#       should_poll
-#       async_update
-#       async_added_to_hass
-#       available
-#     """
-
-#     def __init__(self, coordinator, metric):
-#         """Pass coordinator to CoordinatorEntity."""
-#         super().__init__(coordinator)
-#         self._state = None
-#         self._metric = metric
-#         self._name = metric.name
-
-#     # @property
-#     # def device_class(self):
-#     #     if self.metric.unit == 'kW':
-#     #         return SensorDeviceClass.POWER
-#     #     elif self.metric.unit == 'kWh':
-#     #         return SensorDeviceClass.ENERGY
-
-#     @property
-#     def name(self) -> str:
-#         return self._name
-
-#     @property
-#     def state(self):
-#         if self.coordinator.data[self.name] is not None:
-#             return float(self.coordinator.data[self.name])
-#         else:
-#             return None
-
-#     @property
-#     def unique_id(self) -> str:
-#         return self.name
-
-#     @property
-#     def unit_of_measurement(self):
-#         if self._device.metric.unit == "kW":
-#             return POWER_KILO_WATT
-#         elif self._device.metric.unit == "kWh":
-#             return ENERGY_KILO_WATT_HOUR
-
-#     # @property
-#     # def state_class(self) -> str:
-#     #     return STATE_CLASS_TOTAL_INCREASING
