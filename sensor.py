@@ -59,7 +59,10 @@ async def async_setup_entry(
     and create the sensors for the component
     This function looks nearly identical to the async_setup_platform function
      which is used for setting up the sensors from configuration.yaml.
-    The only difference is we retrieve the config data from the config entry instance."""
+    The only difference is we retrieve the config data from the config entry instance.
+    It seems this function is run on each (re)start of HASS, 
+    TODO so we need a way to check if we need to add the stats or already added them
+    """
     # assuming API object stored here by __init__.py
     fusion_api = hass.data[DOMAIN][config_entry.entry_id]
     entities = []
@@ -93,7 +96,6 @@ async def async_setup_entry(
 
     await _insert_statistics(hass, plants)
 
-    return True
 
 
 async def _insert_statistics(hass, plants):
