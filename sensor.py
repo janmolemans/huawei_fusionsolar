@@ -34,6 +34,7 @@ from homeassistant.components.recorder.models import StatisticData, StatisticMet
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
+    async_import_statistics
 )
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -72,7 +73,6 @@ async def async_setup_entry(
             description = metric_to_description(metric)
             if description is not None:
                 entities.append(FusionSolarEntity(coordinator, description))
-    async_add_entities(entities)
 
     # add device statistics
     add_device_metrics=False #TODO enable later
@@ -85,40 +85,44 @@ async def async_setup_entry(
                 description = metric_to_description(metric)
                 if description is not None:
                     entities.append(FusionSolarEntity(coordinator, description))
-        async_add_entities(entities)
+
+    async_add_entities(entities) #TODO remove await
+
 
     # insert historical data
     _LOGGER.info("adding historical statistics")
 
-    dt = datetime.datetime(year=2022,month=9,day=9)
-    query_time= int(dt.timestamp())*1000
 
-    df = await hass.async_add_executor_job(lambda x: plants[0].get_plant_stats(*x, query_time=query_time),[]) # very ugly hack as i am not allowed ot provide keyword arguments
-    df_hour=df.groupby(pandas.Grouper(freq='60Min')).mean()
-
-    await _insert_statistics(hass, df_hour)
-    _LOGGER.info(f"finished inserting stats")
+    await _insert_statistics(hass, plants)
 
     return True
 
 
-async def _insert_statistics(hass, df_hour):
+async def _insert_statistics(hass, plants):
+    dt = datetime.datetime(year=2022,month=9,day=12)
+    query_time= int(dt.timestamp())*1000
+
+    df = await hass.async_add_executor_job(lambda x: plants[0].get_plant_stats(*x, query_time=query_time),[]) # very ugly hack as i am not allowed ot provide keyword arguments
+    aggs={f"{ag}_{col}":(col, ag) for col in df.columns for ag in ['min','mean','max']}
+    df_hour=df.groupby(pandas.Grouper(freq='60Min')).agg(**aggs)
+
     #TODO move perhaps to inside coordinator class
     """Insert historical statistics."""
     # DOMAIN='sensor' #TODO remove this is for testing
     for column in df_hour.columns:
-        statistic_id = f"{DOMAIN}:{column}".lower()
+        # statistic_id = f"{DOMAIN}:{column}".lower() #external statistic
+        statistic_id = f"sensor.{column}".lower()
 
         _LOGGER.info(f"adding historical statistics for column {statistic_id}")
 
         statistics=[]
-        for dt, val in zip(df_hour.index,df_hour[column]):
+        for dt, mean,min,max in zip(df_hour.index,df_hour[f"mean_{column}"],df_hour[f"min_{column}"],df_hour[f"max_{column}"]):
             statistics.append(
                 StatisticData(
                     start=dt,
-                    mean=val,
-                    min=val,
-                    max=val,
+                    mean=mean,
+                    min=min, #TODO
+                    max=max, #TODO
                 )  )      
 
         metadata = StatisticMetaData(
@@ -130,7 +134,8 @@ async def _insert_statistics(hass, df_hour):
             unit_of_measurement=POWER_KILO_WATT,
         )
         _LOGGER.info(f"adding {len(statistics)} statistics for column {statistic_id}")
-        async_add_external_statistics(hass, metadata, statistics)
+        # async_add_external_statistics(hass, metadata, statistics)
+        async_import_statistics(hass, metadata, statistics)
 
 
 def metric_to_description(metric):
