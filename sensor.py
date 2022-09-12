@@ -75,7 +75,7 @@ async def async_setup_entry(
                 entities.append(FusionSolarEntity(coordinator, description))
 
     # add device statistics
-    add_device_metrics=False #TODO enable later
+    add_device_metrics = False  # TODO enable later
     if add_device_metrics:
         devices = await hass.async_add_executor_job(fusion_api.get_devices)
         for device in devices:
@@ -86,12 +86,10 @@ async def async_setup_entry(
                 if description is not None:
                     entities.append(FusionSolarEntity(coordinator, description))
 
-    async_add_entities(entities) #TODO remove await
-
+    async_add_entities(entities)  # TODO remove await
 
     # insert historical data
     _LOGGER.info("adding historical statistics")
-
 
     await _insert_statistics(hass, plants)
 
@@ -99,39 +97,39 @@ async def async_setup_entry(
 
 
 async def _insert_statistics(hass, plants):
-    dt = datetime.datetime(year=2022,month=9,day=12)
-    query_time= int(dt.timestamp())*1000
-
-    df = await hass.async_add_executor_job(lambda x: plants[0].get_plant_stats(*x, query_time=query_time),[]) # very ugly hack as i am not allowed ot provide keyword arguments
-    aggs={f"{ag}_{col}":(col, ag) for col in df.columns for ag in ['min','mean','max']}
-    df_hour=df.groupby(pandas.Grouper(freq='60Min')).agg(**aggs)
-
-    #TODO move perhaps to inside coordinator class
     """Insert historical statistics."""
-    # DOMAIN='sensor' #TODO remove this is for testing
-    for column in df_hour.columns:
+
+    dt = datetime.datetime(year=2022, month=9, day=12)
+    query_time = int(dt.timestamp()) * 1000
+
+    df = await hass.async_add_executor_job(lambda x: plants[0].get_plant_stats(*x, query_time=query_time), [])  # very ugly hack as i am not allowed ot provide keyword arguments
+    aggs = {f"{ag}_{col}": (col, ag) for col in df.columns for ag in ['min', 'mean', 'max']}
+    df_hour = df.groupby(pandas.Grouper(freq='60Min')).agg(**aggs)
+
+    for column in df.columns:
         # statistic_id = f"{DOMAIN}:{column}".lower() #external statistic
         statistic_id = f"sensor.{column}".lower()
 
         _LOGGER.info(f"adding historical statistics for column {statistic_id}")
 
-        statistics=[]
-        for dt, mean,min,max in zip(df_hour.index,df_hour[f"mean_{column}"],df_hour[f"min_{column}"],df_hour[f"max_{column}"]):
+        statistics = []
+        for dt, mean, min, max in zip(df_hour.index, df_hour[f"mean_{column}"], df_hour[f"min_{column}"], df_hour[f"max_{column}"]):
             statistics.append(
                 StatisticData(
                     start=dt,
-                    mean=mean,
-                    min=min, #TODO
-                    max=max, #TODO
-                )  )      
+                    mean=mean*1000, #convert to Watt
+                    min=min*1000, #convert to Watt
+                    max=max*1000, #convert to Watt
+                ))
 
         metadata = StatisticMetaData(
             has_mean=True,
             has_sum=False,
-            # name=column,
-            source=DOMAIN,
+            name=column,
+            # source=DOMAIN,
+            source='recorder',
             statistic_id=statistic_id,
-            unit_of_measurement=POWER_KILO_WATT,
+            unit_of_measurement=POWER_WATT, # kilo watt not allowed by statistics
         )
         _LOGGER.info(f"adding {len(statistics)} statistics for column {statistic_id}")
         # async_add_external_statistics(hass, metadata, statistics)
@@ -228,6 +226,7 @@ def metric_to_description(metric):
         entity_category=entity_category,
     )
 
+
 class PlantCoordinator(DataUpdateCoordinator):
     """My custom plant coordinator."""
 
@@ -287,8 +286,6 @@ class DeviceCoordinator(DataUpdateCoordinator):
         # except ApiError as err:
         #     raise UpdateFailed(f"Error communicating with API: {err}")
 
-    
-
 
 class FusionSolarEntity(CoordinatorEntity, SensorEntity):
     """Huawei Solar Sensor which receives its data via an DataUpdateCoordinator."""
@@ -305,7 +302,6 @@ class FusionSolarEntity(CoordinatorEntity, SensorEntity):
 
         self.coordinator = coordinator
         self.entity_description = description
-
 
     @property
     def native_value(self):
@@ -325,6 +321,3 @@ class FusionSolarEntity(CoordinatorEntity, SensorEntity):
             return float(value)
         except ValueError:
             return value
-
-
-
